@@ -7,6 +7,8 @@
    A good reference: http://rossum.sourceforge.net/papers/DiffSteer/
    
     Copyright (C) 2012 Jon Stephan. 
+
+    Code updated by John Duarte (2021) - ROS 2 (Foxy)
      
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -47,87 +49,96 @@ diff_controller.py - controller for a differential drive
   OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
   OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.+
 
 """
 
-import rospy
-import roslib
-roslib.load_manifest('differential_drive')
 from math import sin, cos, pi
 
+import rclpy
+from rclpy.node import Node
+from rclpy.duration import Duration
+from rclpy.qos import qos_profile_system_default
 from geometry_msgs.msg import Quaternion
 from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
-from tf.broadcaster import TransformBroadcaster
 from std_msgs.msg import Int16
+from tf2_ros import TransformBroadcaster
 
 #############################################################################
-class DiffTf:
+class DiffTf(Node):
 #############################################################################
 
     #############################################################################
     def __init__(self):
     #############################################################################
-        rospy.init_node("diff_tf")
-        self.nodename = rospy.get_name()
-        rospy.loginfo("-I- %s started" % self.nodename)
+        super().__init__("diff_tf")
+
+        self.nodename = self.get_name()
+        self.get_logger().info("-I- %s started" % self.nodename)
         
         #### parameters #######
-        self.rate = rospy.get_param('~rate',10.0)  # the rate at which to publish the transform
-        self.ticks_meter = float(rospy.get_param('ticks_meter', 50))  # The number of wheel encoder ticks per meter of travel
-        self.base_width = float(rospy.get_param('~base_width', 0.245)) # The wheel base width in meters
+        self.rate = self.declare_parameter('rate',10.0).value  # the rate at which to publish the transform
+        self.ticks_meter = float(self.declare_parameter('ticks_meter', 50).value) # The number of wheel encoder ticks per meter of travel
+        self.base_width = float(self.declare_parameter('base_width', 0.245).value) # The wheel base width in meters
         
-        self.base_frame_id = rospy.get_param('~base_frame_id','base_link') # the name of the base frame of the robot
-        self.odom_frame_id = rospy.get_param('~odom_frame_id', 'odom') # the name of the odometry reference frame
+        self.base_frame_id = self.declare_parameter('base_frame_id','base_link').value # the name of the base frame of the robot
+        self.odom_frame_id = self.declare_parameter('odom_frame_id', 'odom').value # the name of the odometry reference frame
         
-        self.encoder_min = rospy.get_param('encoder_min', -32768)
-        self.encoder_max = rospy.get_param('encoder_max', 32768)
-        self.encoder_low_wrap = rospy.get_param('wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min )
-        self.encoder_high_wrap = rospy.get_param('wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min )
+        self.encoder_min = self.declare_parameter('encoder_min', -32768).value
+        self.encoder_max = self.declare_parameter('encoder_max', 32768).value
+        self.encoder_low_wrap = self.declare_parameter('wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min )
+        self.encoder_high_wrap = self.declare_parameter('wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min )
  
-        self.t_delta = rospy.Duration(1.0/self.rate)
-        self.t_next = rospy.Time.now() + self.t_delta
+        self.t_delta = Duration(seconds = 1.0/self.rate)
+        self.t_next = self.get_clock().now() + self.t_delta
         
         # internal data
         self.enc_left = None        # wheel encoder readings
         self.enc_right = None
-        self.left = 0               # actual values coming back from robot
-        self.right = 0
-        self.lmult = 0
-        self.rmult = 0
-        self.prev_lencoder = 0
-        self.prev_rencoder = 0
-        self.x = 0                  # position in xy plane 
-        self.y = 0
-        self.th = 0
-        self.dx = 0                 # speeds in x/rotation
-        self.dr = 0
-        self.then = rospy.Time.now()
+        self.left = 0.0               # actual values coming back from robot
+        self.right = 0.0
+        self.lmult = 0.0
+        self.rmult = 0.0
+        self.prev_lencoder = 0.0
+        self.prev_rencoder = 0.0
+        self.x = 0.0                  # position in xy plane 
+        self.y = 0.0
+        self.th = 0.0
+        self.dx = 0.0                 # speeds in x/rotation
+        self.dr = 0.0
+        self.then = self.get_clock().now()
         
         # subscriptions
-        rospy.Subscriber("lwheel", Int16, self.lwheelCallback)
-        rospy.Subscriber("rwheel", Int16, self.rwheelCallback)
-        self.odomPub = rospy.Publisher("odom", Odometry, queue_size=10)
-        self.odomBroadcaster = TransformBroadcaster()
-        
+        self.create_subscription(Int16, "lwheel", self.lwheelCallback, qos_profile_system_default)
+        self.create_subscription(Int16, "rwheel", self.rwheelCallback, qos_profile_system_default)
+        self.odomPub = self.create_publisher(Odometry, "odom", qos_profile_system_default)
+
+        # TF2 Broadcaster
+        self.odomBroadcaster = TransformBroadcaster(self)
+
+        duration = 1.0 / self.rate
+        self.create_timer(duration, self.update)
+
+    '''    
     #############################################################################
     def spin(self):
     #############################################################################
-        r = rospy.Rate(self.rate)
-        while not rospy.is_shutdown():
+        r = rclpy.Rate(self.rate)
+        while not rclpy.is_shutdown():
             self.update()
             r.sleep()
-       
+    ''' 
      
     #############################################################################
     def update(self):
     #############################################################################
-        now = rospy.Time.now()
+        now = self.get_clock().now()
         if now > self.t_next:
-            elapsed = now - self.then
+            elapsed = now.seconds_nanoseconds()[1] - self.then.seconds_nanoseconds()[1]
             self.then = now
-            elapsed = elapsed.to_sec()
+            elapsed = elapsed / 1000
             
             # calculate odometry
             if self.enc_left == None:
@@ -164,30 +175,35 @@ class DiffTf:
             quaternion.y = 0.0
             quaternion.z = sin( self.th / 2 )
             quaternion.w = cos( self.th / 2 )
-            self.odomBroadcaster.sendTransform(
-                (self.x, self.y, 0),
-                (quaternion.x, quaternion.y, quaternion.z, quaternion.w),
-                rospy.Time.now(),
-                self.base_frame_id,
-                self.odom_frame_id
-                )
+
+            tfOdometry = TransformStamped()
+            tfOdometry.header.frame_id = self.odom_frame_id
+            tfOdometry.header.stamp = now.to_msg()
+            tfOdometry.child_frame_id = self.base_frame_id
+            tfOdometry.transform.translation.x = self.x
+            tfOdometry.transform.translation.y = self.y
+            tfOdometry.transform.translation.z = 0.0
+            tfOdometry.transform.rotation.x = quaternion.x
+            tfOdometry.transform.rotation.y = quaternion.y
+            tfOdometry.transform.rotation.z = quaternion.z
+            tfOdometry.transform.rotation.w = quaternion.w
+
+            self.odomBroadcaster.sendTransform(tfOdometry)
             
             odom = Odometry()
-            odom.header.stamp = now
+            odom.header.stamp = now.to_msg()
             odom.header.frame_id = self.odom_frame_id
             odom.pose.pose.position.x = self.x
             odom.pose.pose.position.y = self.y
-            odom.pose.pose.position.z = 0
+            odom.pose.pose.position.z = 0.0
             odom.pose.pose.orientation = quaternion
             odom.child_frame_id = self.base_frame_id
             odom.twist.twist.linear.x = self.dx
-            odom.twist.twist.linear.y = 0
+            odom.twist.twist.linear.y = 0.0
             odom.twist.twist.angular.z = self.dr
             self.odomPub.publish(odom)
             
             
-
-
     #############################################################################
     def lwheelCallback(self, msg):
     #############################################################################
@@ -214,12 +230,21 @@ class DiffTf:
         self.right = 1.0 * (enc + self.rmult * (self.encoder_max - self.encoder_min))
         self.prev_rencoder = enc
 
+def main(args=None):
+##########################################################################
+##########################################################################
+    rclpy.init(args=args)
+
+    node = DiffTf()
+    rclpy.spin(node)
+
+    node.destroy_node()
+    rclpy.shutdown(0)
+
+
 #############################################################################
 #############################################################################
 if __name__ == '__main__':
-    """ main """
     try:
-        diffTf = DiffTf()
-        diffTf.spin()
-    except rospy.ROSInterruptException:
-        pass
+        main()
+    except rclpy.ROSInterruptException: pass
