@@ -78,6 +78,8 @@ class PidVelocity(Node):
         self.get_logger().debug("%s got Kp:%0.3f Ki:%0.3f Kd:%0.3f tpm:%0.3f" % (self.nodename, self.Kp, self.Ki, self.Kd, self.ticks_per_meter))
         
         #### subscribers/publishers 
+        
+
         self.create_subscription(Int16, "wheel", self.wheelCallback, qos_profile_system_default) 
         self.create_subscription(Float32, "wheel_vtarget", self.targetCallback, qos_profile_system_default) 
         self.pub_motor = self.create_publisher(Float32, 'motor_cmd', qos_profile_system_default) 

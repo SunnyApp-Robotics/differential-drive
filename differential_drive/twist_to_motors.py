@@ -26,6 +26,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_system_default
 from std_msgs.msg import Float32
 from geometry_msgs.msg import Twist
+from common import Wheels
 
 #############################################################
 #############################################################
@@ -37,52 +38,68 @@ class TwistToMotors(Node):
 
     #############################################################
     def __init__(self):
-        #############################################################
+    #############################################################
         super().__init__("twist_to_motors")
         self.nodename = self.get_name()
         self.get_logger().info("%s started" % self.nodename)
 
-        self.w = self.declare_parameter("base_width", 0.2).value
-        self.rate = self.declare_parameter("rate", 50).value
-        self.timeout_ticks = self.declare_parameter("timeout_ticks", 2).value
-        self.ticks_since_target = self.timeout_ticks
+        #### parameters #######
+        self.radius = float(self.declare_parameter('wheels.radius', 0.012).value) # The wheel radius in meters
+        self.base_width = float(self.declare_parameter('wheels.base_width', 0.245).value) # The wheel base width in meters
+        
+        # Init variables
+        self.init()
+
+        # subscriptions / publishers
+        self.create_subscription(Twist, 'cmd_vel', self.cmdVelCallback, qos_profile_system_default)
+        self.cmd_wheels_pub = self.create_publisher(Wheels, 'cmd_wheels', qos_profile_system_default)
+
+        # 5 seconds timer to update parameters
+        self.create_timer(5, self.parametersCallback)
+    
+    #############################################################################
+    def init(self):
+    #############################################################################
         self.left = 0
         self.right = 0
 
-        self.pub_lmotor = self.create_publisher(
-            Float32, 'lwheel_vtarget', qos_profile_system_default)
-        self.pub_rmotor = self.create_publisher(
-            Float32, 'rwheel_vtarget', qos_profile_system_default)
-        self.create_subscription(Twist, 'cmd_vel', self.twistCallback, qos_profile_system_default)
-
-        duration = 1 / self.rate
-        self.create_timer(duration, self.update)
-
     #############################################################
     def update(self):
-        #############################################################
-        if self.ticks_since_target < self.timeout_ticks:
-
-            # dx = (l + r) / 2
-            # dr = (r - l) / w
-
-            self.right = 1.0 * self.dx + self.dr * self.w / 2
-            self.left = 1.0 * self.dx - self.dr * self.w / 2
-            # rospy.loginfo("publishing: (%d, %d)", left, right)
-
-            self.pub_lmotor.publish(self.left)
-            self.pub_rmotor.publish(self.right)
-
-            self.ticks_since_target += 1
+    #############################################################
+        now = self.get_clock().now() #Current time
+        self.calculateKinematics(now, self.cmd_dx, self.cmd_dr)
 
     #############################################################
-    def twistCallback(self, msg):
-        #############################################################
-        # self.get_logger().info("-D- twistCallback: %s" % str(msg))
-        self.ticks_since_target = 0
-        self.dx = msg.linear.x
-        self.dy = msg.linear.y
-        self.dr = msg.angular.z
+    def calculateKinematics(self, now, dx, dr):
+    #############################################################
+        self.left = dx - self.base_width * dr / self.radius
+        self.right = dx + self.base_width * dr / self.radius
+
+        self.publishWheelsCmd(now)
+
+    #############################################################
+    def publishWheelsCmd(self, now):
+    #############################################################
+        cmd_wheels = Wheels()
+        cmd_wheels.param[0] = self.right
+        cmd_wheels.param[1] = self.left
+        
+        self.cmd_wheels_pub.publish(cmd_wheels)
+
+    #############################################################
+    def cmdVelCallback(self, msg):
+    #############################################################
+        self.cmd_dx = msg.linear.x
+        self.cmd_dr = msg.angular.z
+
+        self.update()
+
+    #############################################################
+    def parametersCallback(self):
+    #############################################################
+        self.radius = float(self.get_parameter('wheels.radius', 0.012).value) # The wheel radius in meters
+        self.base_width = float(self.get_parameter('wheels.base_width', 0.245).value) # The wheel base width in meters
+        
 
 
 def main(args=None):
