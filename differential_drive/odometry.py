@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-   diff_tf.py - follows the output of a wheel encoder and
+   Odometry (diff_tf) - follows the output of a wheel encoder and
    creates tf and odometry messages.
    some code borrowed from the arbotix diff_controller script
    A good reference: http://rossum.sourceforge.net/papers/DiffSteer/
@@ -68,49 +68,68 @@ from tf2_ros import TransformBroadcaster
 from common import Wheels
 
 #############################################################################
-class DiffTf(Node):
-#############################################################################
+
+
+class Odometry(Node):
+    #############################################################################
 
     #############################################################################
     def __init__(self):
-    #############################################################################
-        super().__init__("diff_tf")
+        #############################################################################
+        super().__init__("odometry")
 
         self.nodename = self.get_name()
         self.get_logger().info("-I- %s started" % self.nodename)
-        
+
         #### parameters #######
-        self.radius = float(self.declare_parameter('wheels.radius', 0.012).value) # The wheel radius in meters
-        self.base_width = float(self.declare_parameter('wheels.base_width', 0.245).value) # The wheel base width in meters
-        
-        self.base_frame_id = self.declare_parameter('base_frame_id','base_link').value # the name of the base frame of the robot
-        self.odom_frame_id = self.declare_parameter('odom_frame_id', 'odom').value # the name of the odometry reference frame
-        
-        self.ticks_mode = self.declare_parameter('ticks.ticks_mode', False).value
-        self.ticks_meter = float(self.declare_parameter('ticks.ticks_meter', 50.0).value) # The number of wheel encoder ticks per meter of travel
-        self.encoder_min = self.declare_parameter('ticks.encoder_min', -32768).value
-        self.encoder_max = self.declare_parameter('ticks.encoder_max', 32768).value
-        self.encoder_low_wrap = self.declare_parameter('ticks.wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min )
-        self.encoder_high_wrap = self.declare_parameter('ticks.wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min )
+        self.radius = float(self.declare_parameter(
+            'wheels.radius', 0.012).value)  # The wheel radius in meters
+        self.base_width = float(self.declare_parameter(
+            'wheels.base_width', 0.245).value)  # The wheel base width in meters
+
+        # the name of the base frame of the robot
+        self.base_frame_id = self.declare_parameter(
+            'base_frame_id', 'base_link').value
+        # the name of the odometry reference frame
+        self.odom_frame_id = self.declare_parameter(
+            'odom_frame_id', 'odom').value
+
+        self.ticks_mode = self.declare_parameter(
+            'ticks.ticks_mode', False).value
+        # The number of wheel encoder ticks per meter of travel
+        self.ticks_meter = float(self.declare_parameter(
+            'ticks.ticks_meter', 50.0).value)
+        self.encoder_min = self.declare_parameter(
+            'ticks.encoder_min', -32768).value
+        self.encoder_max = self.declare_parameter(
+            'ticks.encoder_max', 32768).value
+        self.encoder_low_wrap = self.declare_parameter(
+            'ticks.wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min)
+        self.encoder_high_wrap = self.declare_parameter(
+            'ticks.wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min)
 
         # Init variables
         self.init()
-        
+
         # subscriptions / publishers
-        self.create_subscription(Wheels, "robot/wheels", self.wheelsCallback, qos_profile_system_default)
-        self.create_subscription(Wheels, "robot/wheels_enc", self.wheelsEncCallback, qos_profile_system_default)
-        self.cal_vel_pub =  self.create_publisher(Twist, "cal_vel", qos_profile_system_default)
-        self.odom_pub = self.create_publisher(Odometry, "odom", qos_profile_system_default)
+        self.create_subscription(
+            Wheels, "robot/enc_wheels", self.wheelsCallback, qos_profile_system_default)
+        self.create_subscription(
+            Wheels, "robot/enc_ticks_wheels", self.wheelsEncCallback, qos_profile_system_default)
+        self.cal_vel_pub = self.create_publisher(
+            Twist, "cal_wheels", qos_profile_system_default)
+        self.odom_pub = self.create_publisher(
+            Odometry, "odom", qos_profile_system_default)
 
         # 5 seconds timer to update parameters
         self.create_timer(5, self.parametersCallback)
 
         # TF2 Broadcaster
         self.odomBroadcaster = TransformBroadcaster(self)
-    
+
     #############################################################################
     def init(self):
-    #############################################################################
+        #############################################################################
         # internal data
         self.enc_left = None        # wheel encoder readings
         self.enc_right = None
@@ -122,71 +141,73 @@ class DiffTf(Node):
         self.prev_lencoder = 0.0
         self.prev_rencoder = 0.0
 
-        self.x = 0.0                  # position in xy plane 
+        self.x = 0.0                  # position in xy plane
         self.y = 0.0
         self.th = 0.0
         self.dx = 0.0                 # speeds in x/rotation
         self.dr = 0.0
 
         self.then = self.get_clock().now()
-     
+
     #############################################################################
     def update(self):
-    #############################################################################
-        now = self.get_clock().now() # Current time
+        #############################################################################
+        now = self.get_clock().now()  # Current time
 
-        self.calculateOdometry(now) # Calculate Odometry
-        self.publishCalVel() # Publish Calculated Velocities
-        self.publishOdometry(now) # Publish Odometry
-    
+        self.calculateOdometry(now)  # Calculate Odometry
+        self.publishCalVel()  # Publish Calculated Velocities
+        self.publishOdometry(now)  # Publish Odometry
+
     def calculateOdometry(self, now):
 
-            elapsed = now.seconds_nanoseconds()[1] - self.then.seconds_nanoseconds()[1] # Elapsed time [nanoseconds]
-            elapsed = elapsed / 1000 # Elapsed time [seconds]
-            self.then = now # Update previous time
-            
-            # calculate odometry
-            if self.ticks_mode:
-                if self.enc_left == None:
-                    d_left = 0
-                    d_right = 0
-                else:
-                    d_left = (self.left - self.enc_left) / self.ticks_meter
-                    d_right = (self.right - self.enc_right) / self.ticks_meter
-                self.enc_left = self.left
-                self.enc_right = self.right
+        # Elapsed time [nanoseconds]
+        elapsed = now.seconds_nanoseconds(
+        )[1] - self.then.seconds_nanoseconds()[1]
+        elapsed = elapsed / 1000  # Elapsed time [seconds]
+        self.then = now  # Update previous time
+
+        # calculate odometry
+        if self.ticks_mode:
+            if self.enc_left == None:
+                d_left = 0
+                d_right = 0
             else:
-                d_left = self.left * self.radius
-                d_right = self.right * self.radius
-           
-            # Linear velocity
-            d = ( d_left + d_right ) / 2
-            # Angular velocity
-            th = ( d_right - d_left ) / self.base_width
-            # calculate velocities
-            self.dx = d / elapsed
-            self.dr = th / elapsed
+                d_left = (self.left - self.enc_left) / self.ticks_meter
+                d_right = (self.right - self.enc_right) / self.ticks_meter
+            self.enc_left = self.left
+            self.enc_right = self.right
+        else:
+            d_left = self.left * self.radius
+            d_right = self.right * self.radius
 
-            # Accumulate 
-           
-            # Calculate distance traveled in x and y
-            x = cos( th ) * d
-            y = -sin( th ) * d
+        # Linear velocity
+        d = (d_left + d_right) / 2
+        # Angular velocity
+        th = (d_right - d_left) / self.base_width
+        # calculate velocities
+        self.dx = d / elapsed
+        self.dr = th / elapsed
 
-            # Calculate the final position of the robot
-            self.x = self.x + ( cos( self.th ) * x - sin( self.th ) * y )
-            self.y = self.y + ( sin( self.th ) * x + cos( self.th ) * y )
-            self.th = self.th + th
-    
+        # Accumulate
+
+        # Calculate distance traveled in x and y
+        x = cos(th) * d
+        y = -sin(th) * d
+
+        # Calculate the final position of the robot
+        self.x = self.x + (cos(self.th) * x - sin(self.th) * y)
+        self.y = self.y + (sin(self.th) * x + cos(self.th) * y)
+        self.th = self.th + th
+
     def publishOdometry(self, now):
 
         # publish the odom information
         quaternion = Quaternion()
-        
+
         quaternion.x = 0.0
         quaternion.y = 0.0
-        quaternion.z = sin( self.th / 2 )
-        quaternion.w = cos( self.th / 2 )
+        quaternion.z = sin(self.th / 2)
+        quaternion.w = cos(self.th / 2)
 
         # TF Broadcaster
 
@@ -206,8 +227,8 @@ class DiffTf(Node):
 
         self.odomBroadcaster.sendTransform(tfOdometry)
 
-        #Odometry 
-        
+        # Odometry
+
         odom = Odometry()
         odom.header.stamp = now.to_msg()
 
@@ -225,7 +246,7 @@ class DiffTf(Node):
         self.odom_pub.publish(odom)
 
     def publishCalVel(self):
-        
+
         cal_vel = Twist()
         cal_vel.linear.x = self.dx
         cal_vel.angular.z = self.dr
@@ -234,35 +255,37 @@ class DiffTf(Node):
 
     def wheelsEncCallback(self, msg):
 
-        ### Right Wheel Encoder
+        # Right Wheel Encoder
         encRight = msg.param[0]
 
         if(encRight < self.encoder_low_wrap and self.prev_rencoder > self.encoder_high_wrap):
             self.rmult = self.rmult + 1
-        
+
         if(encRight > self.encoder_high_wrap and self.prev_rencoder < self.encoder_low_wrap):
             self.rmult = self.rmult - 1
-            
-        self.right = 1.0 * (encRight + self.rmult * (self.encoder_max - self.encoder_min))
+
+        self.right = 1.0 * (encRight + self.rmult *
+                            (self.encoder_max - self.encoder_min))
         self.prev_rencoder = encRight
-        
-        ### Left Wheel Encoder
+
+        # Left Wheel Encoder
         encLeft = msg.param[1]
 
         if (encLeft < self.encoder_low_wrap and self.prev_lencoder > self.encoder_high_wrap):
             self.lmult = self.lmult + 1
-            
+
         if (encLeft > self.encoder_high_wrap and self.prev_lencoder < self.encoder_low_wrap):
             self.lmult = self.lmult - 1
-            
-        self.left = 1.0 * (encLeft + self.lmult * (self.encoder_max - self.encoder_min)) 
+
+        self.left = 1.0 * (encLeft + self.lmult *
+                           (self.encoder_max - self.encoder_min))
         self.prev_lencoder = encLeft
 
         self.update()
 
     #############################################################################
     def wheelsCallback(self, msg):
-    #############################################################################
+        #############################################################################
         self.right = msg.param[0]
         self.left = msg.param[1]
 
@@ -270,34 +293,48 @@ class DiffTf(Node):
 
     #############################################################################
     def parametersCallback(self):
-    #############################################################################
-        self.radius = float(self.get_parameter('wheels.radius', 0.012).value) # The wheel radius in meters
-        self.base_width = float(self.get_parameter('wheels.base_width', 0.245).value) # The wheel base width in meters
-        
-        self.base_frame_id = self.get_parameter('base_frame_id','base_link').value # the name of the base frame of the robot
-        self.odom_frame_id = self.get_parameter('odom_frame_id', 'odom').value # the name of the odometry reference frame
-        
-        self.ticks_mode = self.get_parameter('ticks.ticks_mode', False).value
-        self.ticks_meter = float(self.get_parameter('ticks.ticks_meter', 50.0).value) # The number of wheel encoder ticks per meter of travel
-        self.encoder_min = self.get_parameter('ticks.encoder_min', -32768).value
-        self.encoder_max = self.get_parameter('ticks.encoder_max', 32768).value
-        self.encoder_low_wrap = self.get_parameter('ticks.wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min )
-        self.encoder_high_wrap = self.get_parameter('ticks.wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min )
+        #############################################################################
+        # The wheel radius in meters
+        self.radius = float(self.get_parameter('wheels.radius').value)
+        # The wheel base width in meters
+        self.base_width = float(self.get_parameter(
+            'wheels.base_width').value)
+
+        # the name of the base frame of the robot
+        self.base_frame_id = self.get_parameter(
+            'base_frame_id').value
+        # the name of the odometry reference frame
+        self.odom_frame_id = self.get_parameter('odom_frame_id').value
+
+        self.ticks_mode = self.get_parameter('ticks.ticks_mode').value
+        # The number of wheel encoder ticks per meter of travel
+        self.ticks_meter = float(self.get_parameter(
+            'ticks.ticks_meter').value)
+        self.encoder_min = self.get_parameter(
+            'ticks.encoder_min').value
+        self.encoder_max = self.get_parameter('ticks.encoder_max').value
+        self.encoder_low_wrap = self.get_parameter(
+            'ticks.wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min)
+        self.encoder_high_wrap = self.get_parameter(
+            'ticks.wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min)
+
 
 def main(args=None):
-##########################################################################
-##########################################################################
+    ##########################################################################
+    ##########################################################################
     rclpy.init(args=args)
 
-    node = DiffTf()
+    node = Odometry()
     rclpy.spin(node)
 
     node.destroy_node()
     rclpy.shutdown(0)
+
 
 #############################################################################
 #############################################################################
 if __name__ == '__main__':
     try:
         main()
-    except rclpy.ROSInterruptException: pass
+    except rclpy.ROSInterruptException:
+        pass

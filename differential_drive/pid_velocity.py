@@ -26,7 +26,8 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_system_default
 from std_msgs.msg import Int16
 from std_msgs.msg import Float32
-from numpy import array
+from common import Wheels
+import numpy as np
 
     
 ######################################################
@@ -43,173 +44,117 @@ class PidVelocity(Node):
         self.nodename = self.get_name()
         self.get_logger().info("%s started" % self.nodename)
         
-        ### initialize variables
-        self.target = 0.0
-        self.motor = 0.0
-        self.vel = 0.0
-        self.integral = 0.0
-        self.error = 0.0
-        self.derivative = 0.0
-        self.previous_error = 0.0
-        self.wheel_prev = 0.0
-        self.wheel_latest = 0.0
-        self.then = self.get_clock().now()
-        self.wheel_mult = 0.0
-        self.prev_encoder = 0.0
-        
-        ### get parameters #### 
-        self.Kp = self.declare_parameer('Kp',10).value
-        self.Ki = self.declare_parameer('Ki',10).value
-        self.Kd = self.declare_parameer('Kd',0.001).value
-        self.out_min = self.declare_parameer('out_min',-255).value
-        self.out_max = self.declare_parameer('out_max',255).value
-        self.rate = self.declare_parameer('rate',30).value
-        self.rolling_pts = self.declare_parameer('rolling_pts',2).value
-        self.timeout_ticks = self.declare_parameer('timeout_ticks',4).value
-        self.ticks_per_meter = self.declare_parameer('ticks_meter', 20).value
-        self.vel_threshold = self.declare_parameer('vel_threshold', 0.001).value
-        self.encoder_min = self.declare_parameer('encoder_min', -32768).value
-        self.encoder_max = self.declare_parameer('encoder_max', 32768).value
-        self.encoder_low_wrap = self.declare_parameer('wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min ).value
-        self.encoder_high_wrap = self.declare_parameer('wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min ).value
-        self.prev_vel = [0.0] * self.rolling_pts
-        self.wheel_latest = 0.0
-        self.prev_pid_time = self.Time.now()
-        self.get_logger().debug("%s got Kp:%0.3f Ki:%0.3f Kd:%0.3f tpm:%0.3f" % (self.nodename, self.Kp, self.Ki, self.Kd, self.ticks_per_meter))
-        
+        ### parameters #### 
+        self.close_loop = self.declare_parameter('close_loop', True).value
+        self.kp = self.declare_parameter('kp',10).value
+        self.ki = self.declare_parameter('ki',10).value
+        self.kd = self.declare_parameter('kd',0.001).value
+
+        self.limited = self.declare_parameter('limited', True).value
+        self.vel_min = self.declare_parameter('vel_min',-1.0).value * np.ones(2)
+        self.vel_max = self.declare_parameter('vel_max',1.0).value * np.ones(2)
+
+        self.get_logger().debug("%s got kp:%0.3f ki:%0.3f kd:%0.3f" % (self.nodename, self.kp, self.ki, self.kd))
+
         #### subscribers/publishers 
-        
+        self.create_subscription(Wheels, "goal_wheels", self.goalWheelsCallback, qos_profile_system_default)
+        self.create_subscription(Wheels, "cal_wheels", self.calWheelsCallback, qos_profile_system_default)
+ 
+        self.pub_motor = self.create_publisher(Wheels, 'cmd_wheels', qos_profile_system_default) 
 
-        self.create_subscription(Int16, "wheel", self.wheelCallback, qos_profile_system_default) 
-        self.create_subscription(Float32, "wheel_vtarget", self.targetCallback, qos_profile_system_default) 
-        self.pub_motor = self.create_publisher(Float32, 'motor_cmd', qos_profile_system_default) 
-        self.pub_vel = self.create_publisher(Float32, 'wheel_vel', qos_profile_system_default)
-
-        self.ticks_since_target = self.timeout_ticks
-        self.wheel_prev = self.wheel_latest
-
-        duration = 1 / self.rate
-        self.create_timer(duration, self.update)
+        self.create_timer(5, self.parametersCallback())
             
+    #####################################################
+    def init(self):
+    #####################################################
+        ### initialize variables
+        self.prev_pid_time = self.get_clock().now()
+        self.previous_error = np.zeros(2)
+        self.integral = np.zeros(2)
+        self.target = np.zeros(2)
+        self.sensor = np.zeros(2)
     #####################################################
     def update(self):
     #####################################################
-        self.previous_error = 0.0
-        self.prev_vel = [0.0] * self.rolling_pts
-        self.integral = 0.0
-        self.error = 0.0
-        self.derivative = 0.0 
-        self.vel = 0.0
-        
-        # only do the loop if we've recently recieved a target velocity message
-        if self.ticks_since_target < self.timeout_ticks:
-            self.calcVelocity()
-            self.doPid()
-            self.pub_motor.publish(self.motor)
-            self.ticks_since_target += 1
-            if self.ticks_since_target == self.timeout_ticks:
-                self.pub_motor.publish(0)
-            
-    #####################################################
-    def calcVelocity(self):
-    #####################################################
-        self.dt_duration = self.get_clock().now() - self.then
-        self.dt = self.dt_duration.to_sec()
-        self.get_logger().debug("-D- %s caclVelocity dt=%0.3f wheel_latest=%0.3f wheel_prev=%0.3f" % (self.nodename, self.dt, self.wheel_latest, self.wheel_prev))
-        
-        if (self.wheel_latest == self.wheel_prev):
-            # we haven't received an updated wheel lately
-            cur_vel = (1 / self.ticks_per_meter) / self.dt    # if we got a tick right now, this would be the velocity
-            if abs(cur_vel) < self.vel_threshold: 
-                # if the velocity is < threshold, consider our velocity 0
-                self.get_logger().debug("-D- %s below threshold cur_vel=%0.3f vel=0" % (self.nodename, cur_vel))
-                self.appendVel(0)
-                self.calcRollingVel()
-            else:
-                self.get_logger().debug("-D- %s above threshold cur_vel=%0.3f" % (self.nodename, cur_vel))
-                if abs(cur_vel) < self.vel:
-                    self.get_logger().debug("-D- %s cur_vel < self.vel" % self.nodename)
-                    # we know we're slower than what we're currently publishing as a velocity
-                    self.appendVel(cur_vel)
-                    self.calcRollingVel()
-            
-        else:
-            # we received a new wheel value
-            cur_vel = (self.wheel_latest - self.wheel_prev) / self.dt
-            self.appendVel(cur_vel)
-            self.calcRollingVel()
-            self.get_logger().debug("-D- %s **** wheel updated vel=%0.3f **** " % (self.nodename, self.vel))
-            self.wheel_prev = self.wheel_latest
-            self.then = self.get_clock().now()
-            
-        self.pub_vel.publish(self.vel)
+        now = self.get_clock().now()
+        self.doPid(now)
+        self.pub_motor.publish(self.motor)
         
     #####################################################
-    def appendVel(self, val):
+    def doPid(self, now):
     #####################################################
-        self.prev_vel.append(val)
-        del self.prev_vel[0]
         
-    #####################################################
-    def calcRollingVel(self):
-    #####################################################
-        p = array(self.prev_vel)
-        self.vel = p.mean()
-        
-    #####################################################
-    def doPid(self):
-    #####################################################
-        pid_dt_duration = self.get_clock().now() - self.prev_pid_time
+        # Time interval
+        pid_dt_duration = now - self.prev_pid_time
         pid_dt = pid_dt_duration.to_sec()
-        self.prev_pid_time = self.get_clock().now()
+        self.prev_pid_time = now
         
-        self.error = self.target - self.vel
-        self.integral = self.integral + (self.error * pid_dt)
-        # rospy.loginfo("i = i + (e * dt):  %0.3f = %0.3f + (%0.3f * %0.3f)" % (self.integral, self.integral, self.error, pid_dt))
-        self.derivative = (self.error - self.previous_error) / pid_dt
-        self.previous_error = self.error
-    
-        self.motor = (self.Kp * self.error) + (self.Ki * self.integral) + (self.Kd * self.derivative)
-    
-        if self.motor > self.out_max:
-            self.motor = self.out_max
-            self.integral = self.integral - (self.error * pid_dt)
-        if self.motor < self.out_min:
-            self.motor = self.out_min
-            self.integral = self.integral - (self.error * pid_dt)
-      
-        if (self.target == 0):
-            self.motor = 0
-    
-        self.get_logger().debug("vel:%0.2f tar:%0.2f err:%0.2f int:%0.2f der:%0.2f ## motor:%d " % 
-                      (self.vel, self.target, self.error, self.integral, self.derivative, self.motor))
-    
-    
+        # Error 
+        error = np.array(self.target - self.sensor)
 
+        # Proportional
+        errorKp = self.kp * error
+
+        # Integral
+        self.integral = self.integral + (error * pid_dt)
+        errorKi = self.ki * self.integral
+
+        # Derivative
+        derivative = (error - self.previous_error) / pid_dt
+        self.previous_error = error
+        errorKd = self.kd * derivative
+    
+        # PID 
+        motor = (errorKp) + (errorKi) + (errorKd)
+
+        # Limiter
+        motor_limited = np.clip(motor, self.vel_min, self.vel_max)
+        if motor_limited != motor:
+            self.integral = self.integral - (error * pid_dt)
+      
+        if ( all(self.target == 0) ):
+            motor = motor * 0.0
+            motor_limited = motor_limited * 0.0
+        
+        if self.limited:
+            self.publishCmdWheels(motor_limited)
+        else:
+            self.publishCmdWheels(motor)
+    
+    #####################################################
+    def goalWheelsCallback(self,msg):
+    #####################################################
+        self.target = msg.param
+        if not self.close_loop:
+            self.update()
 
     #####################################################
-    def wheelCallback(self, msg):
-    ######################################################
-        enc = msg.data
-        if (enc < self.encoder_low_wrap and self.prev_encoder > self.encoder_high_wrap) :
-            self.wheel_mult = self.wheel_mult + 1
-            
-        if (enc > self.encoder_high_wrap and self.prev_encoder < self.encoder_low_wrap) :
-            self.wheel_mult = self.wheel_mult - 1
-           
-         
-        self.wheel_latest = 1.0 * (enc + self.wheel_mult * (self.encoder_max - self.encoder_min)) / self.ticks_per_meter 
-        self.prev_encoder = enc
-        
-        
-        #self.get_logger().debug("-D- %s wheelCallback msg.data= %0.3f wheel_latest = %0.3f mult=%0.3f" % (self.nodename, enc, self.wheel_latest, self.wheel_mult))
+    def calWheelsCallback(self, msg):
+    #####################################################
+        self.sensor = msg.param
+        if self.close_loop:
+            self.update()
+
+    #####################################################
+    def publishCmdWheels(self, motor):
+    #####################################################
+        cmd_wheels = Wheels()
+        cmd_wheels.param[0] = motor[0]
+        cmd_wheels.param[1] = motor[1]
+
+        self.pub_motor.publish(cmd_wheels)
     
-    ######################################################
-    def targetCallback(self, msg):
-    ######################################################
-        self.target = msg.data
-        self.ticks_since_target = 0
-        # self.get_logger().debug("-D- %s targetCallback " % (self.nodename))
+    #####################################################
+    def parametersCallback(self):
+    #####################################################
+        self.close_loop = self.get_parameter('close_loop').value
+        self.kp = self.get_parameter('kp').value
+        self.ki = self.get_parameter('ki').value
+        self.kd = self.get_parameter('kd').value
+
+        self.limited = self.get_parameter('limited').value
+        self.vel_min = self.get_parameter('vel_min').value * np.ones(2)
+        self.vel_max = self.get_parameter('vel_max').value * np.ones(2)
 
 def main(args=None):
     ##########################################################################

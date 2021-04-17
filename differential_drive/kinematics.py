@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """
-   twist_to_motors - converts a twist message to motor commands.  Needed for navigation stack
-   
-   
+    Kinematic (twist_to_motors) - converts a twist message to motor commands.  Needed for navigation stack
+    
     Copyright (C) 2012 Jon Stephan. 
+
+    Code updated by John Duarte (2021) - ROS 2 (Foxy)
      
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -18,7 +19,6 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-    Code updated by John Duarte (2021) - ROS 2 (Foxy)
 """
 
 import rclpy
@@ -32,14 +32,14 @@ from common import Wheels
 #############################################################
 
 
-class TwistToMotors(Node):
+class Kinematics(Node):
     #############################################################
     #############################################################
 
     #############################################################
     def __init__(self):
     #############################################################
-        super().__init__("twist_to_motors")
+        super().__init__("kinematics")
         self.nodename = self.get_name()
         self.get_logger().info("%s started" % self.nodename)
 
@@ -52,7 +52,7 @@ class TwistToMotors(Node):
 
         # subscriptions / publishers
         self.create_subscription(Twist, 'cmd_vel', self.cmdVelCallback, qos_profile_system_default)
-        self.cmd_wheels_pub = self.create_publisher(Wheels, 'cmd_wheels', qos_profile_system_default)
+        self.cmd_wheels_pub = self.create_publisher(Wheels, 'goal_wheels', qos_profile_system_default)
 
         # 5 seconds timer to update parameters
         self.create_timer(5, self.parametersCallback)
@@ -107,7 +107,7 @@ def main(args=None):
     ##########################################################################
     rclpy.init(args=args)
 
-    node = TwistToMotors()
+    node = Kinematics()
     rclpy.spin(node)
 
     node.destroy_node()
