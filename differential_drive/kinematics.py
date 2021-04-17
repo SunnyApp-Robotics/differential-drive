@@ -24,9 +24,8 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_system_default
-from std_msgs.msg import Float32
 from geometry_msgs.msg import Twist
-from common import Wheels
+from common.msg import Wheels
 
 #############################################################
 #############################################################
@@ -54,7 +53,7 @@ class Kinematics(Node):
         self.create_subscription(Twist, 'cmd_vel', self.cmdVelCallback, qos_profile_system_default)
         self.cmd_wheels_pub = self.create_publisher(Wheels, 'goal_wheels', qos_profile_system_default)
 
-        # 5 seconds timer to update parameters
+        # 5 seconds timer to update parametersl
         self.create_timer(5, self.parametersCallback)
     
     #############################################################################
@@ -97,8 +96,8 @@ class Kinematics(Node):
     #############################################################
     def parametersCallback(self):
     #############################################################
-        self.radius = float(self.get_parameter('wheels.radius', 0.012).value) # The wheel radius in meters
-        self.base_width = float(self.get_parameter('wheels.base_width', 0.245).value) # The wheel base width in meters
+        self.radius = float(self.get_parameter('wheels.radius').value) # The wheel radius in meters
+        self.base_width = float(self.get_parameter('wheels.base_width').value) # The wheel base width in meters
         
 
 

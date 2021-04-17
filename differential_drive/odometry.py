@@ -63,14 +63,13 @@ from geometry_msgs.msg import Quaternion
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Int16
 from tf2_ros import TransformBroadcaster
-from common import Wheels
+from common.msg import Wheels
 
 #############################################################################
 
 
-class Odometry(Node):
+class Odometry_Encoders(Node):
     #############################################################################
 
     #############################################################################
@@ -136,6 +135,8 @@ class Odometry(Node):
 
         self.left = 0.0               # actual values coming back from robot
         self.right = 0.0
+        self.lvel = 0.0
+        self.rvel = 0.0
         self.lmult = 0.0
         self.rmult = 0.0
         self.prev_lencoder = 0.0
@@ -154,17 +155,16 @@ class Odometry(Node):
         #############################################################################
         now = self.get_clock().now()  # Current time
 
-        self.calculateOdometry(now)  # Calculate Odometry
-        self.publishCalVel()  # Publish Calculated Velocities
+        # Elapsed time [nanoseconds]
+        elapsed = now.seconds_nanoseconds()[1] - self.then.seconds_nanoseconds()[1]
+        elapsed = elapsed / 1e9  # Elapsed time [seconds]
+        self.then = now  # Update previous time
+
+        self.calculateOdometry(elapsed)  # Calculate Odometry
+        self.publishCalVel(elapsed)  # Publish Calculated Velocities
         self.publishOdometry(now)  # Publish Odometry
 
-    def calculateOdometry(self, now):
-
-        # Elapsed time [nanoseconds]
-        elapsed = now.seconds_nanoseconds(
-        )[1] - self.then.seconds_nanoseconds()[1]
-        elapsed = elapsed / 1000  # Elapsed time [seconds]
-        self.then = now  # Update previous time
+    def calculateOdometry(self, elapsed):
 
         # calculate odometry
         if self.ticks_mode:
@@ -183,7 +183,7 @@ class Odometry(Node):
         # Linear velocity
         d = (d_left + d_right) / 2
         # Angular velocity
-        th = (d_right - d_left) / self.base_width
+        th = (d_right - d_left) / (2 * self.base_width)
         # calculate velocities
         self.dx = d / elapsed
         self.dr = th / elapsed
@@ -245,11 +245,12 @@ class Odometry(Node):
 
         self.odom_pub.publish(odom)
 
-    def publishCalVel(self):
+    def publishCalVel(self, elapsed):
 
         cal_vel = Twist()
         cal_vel.linear.x = self.dx
         cal_vel.angular.z = self.dr
+        cal_vel.linear.z = elapsed
 
         self.cal_vel_pub.publish(cal_vel)
 
@@ -313,10 +314,12 @@ class Odometry(Node):
         self.encoder_min = self.get_parameter(
             'ticks.encoder_min').value
         self.encoder_max = self.get_parameter('ticks.encoder_max').value
+        '''
         self.encoder_low_wrap = self.get_parameter(
             'ticks.wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min)
         self.encoder_high_wrap = self.get_parameter(
             'ticks.wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min)
+        '''
 
 
 def main(args=None):
@@ -324,7 +327,7 @@ def main(args=None):
     ##########################################################################
     rclpy.init(args=args)
 
-    node = Odometry()
+    node = Odometry_Encoders()
     rclpy.spin(node)
 
     node.destroy_node()
