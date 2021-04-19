@@ -156,7 +156,7 @@ class Kinematics(Node):
         self.cmd_wheels[1] = left
 
     #############################################################
-    def publishWheelsCmd(self, now):
+    def publishWheelsCmd(self):
         #############################################################
         cmd_wheels = Wheels()
         cmd_wheels.param[0] = self.cmd_wheels[0]

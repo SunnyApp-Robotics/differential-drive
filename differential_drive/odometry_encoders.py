@@ -154,6 +154,8 @@ class Odometry_Encoders(Node):
             10), "next_insert": 0, "buffer_filled": False}
         self.angular_accumulator = {"sum": 0.0, "buffer": np.zeros(
             10), "next_insert": 0, "buffer_filled": False}
+        self.dt_accumulator = {"sum": 0.0, "buffer": np.zeros(
+            5), "next_insert": 0, "buffer_filled": False}
 
         self.then = self.get_clock().now()
 
@@ -164,11 +166,12 @@ class Odometry_Encoders(Node):
 
         # Elapsed time [nanoseconds]
         elapsed = now.nanoseconds - self.then.nanoseconds
-        elapsed = float(elapsed) / 1e9  # Elapsed time [seconds]
+        elapsed = float(elapsed) / 1e9  # Elapsed time [seconds]        
         self.then = now  # Update previous time
+        self.dt_accumulator = self.accumulateMean(self.dt_accumulator, elapsed)
 
-        self.calculateOdometry(elapsed)  # Calculate Odometry
-        self.publishCalVel(elapsed)  # Publish Calculated Velocities
+        self.calculateOdometry(self.getRollingMean(self.dt_accumulator))  # Calculate Odometry
+        self.publishCalVel(self.getRollingMean(self.dt_accumulator))  # Publish Calculated Velocities
         self.publishOdometry(now)  # Publish Odometry
 
     #############################################################################

@@ -1,9 +1,9 @@
 ### PARAMETERS
 odometry_encoders:
-  ros_parameters:
+  ros__parameters:
 
     # Sim time
-    use_sim_time: false
+    use_sim_time: False
 
     wheels.radius: 0.02569
     wheels.base_width: 0.1275
@@ -17,13 +17,22 @@ odometry_encoders:
     ticks.encoder_max: 32768
 
 kinematics:
-  ros_parameters:
+  ros__parameters:
 
     # Sim time
-    use_sim_time: false
+    use_sim_time: False
 
     wheels.radius: 0.02569
     wheels.base_width: 0.1275
+
+    close_loop: True
+    kp: 0.4
+    ki: 2.5
+    kd: 1.0
+
+    limited: True
+    linear_max: 0.621
+    angular_max: 4.84
 
     
 
