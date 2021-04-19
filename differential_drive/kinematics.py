@@ -128,7 +128,7 @@ class Kinematics(Node):
 
             # Limiter
             motor_limited = np.clip(motor, -np.array([self.linear_max, self.angular_max]), np.array([self.linear_max, self.angular_max]))
-            if motor_limited != motor:
+            if any(motor_limited != motor):
                 self.integral = self.integral - (error * pid_dt)
 
             if self.limited:
