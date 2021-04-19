@@ -113,7 +113,7 @@ class Odometry_Encoders(Node):
         self.create_subscription(
             Wheels, "robot/enc_ticks_wheels", self.wheelsEncCallback, qos_profile_system_default)
         self.cal_vel_pub = self.create_publisher(
-            Twist, "cal_wheels", qos_profile_system_default)
+            Twist, "cal_vel", qos_profile_system_default)
         self.odom_pub = self.create_publisher(
             Odometry, "odom", qos_profile_system_default)
 
@@ -164,7 +164,7 @@ class Odometry_Encoders(Node):
 
         # Elapsed time [nanoseconds]
         elapsed = now.nanoseconds - self.then.nanoseconds
-        elapsed = elapsed / 1e9  # Elapsed time [seconds]
+        elapsed = float(elapsed) / 1e9  # Elapsed time [seconds]
         self.then = now  # Update previous time
 
         self.calculateOdometry(elapsed)  # Calculate Odometry

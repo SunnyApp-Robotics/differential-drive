@@ -57,10 +57,10 @@ class PidVelocity(Node):
         self.get_logger().debug("%s got kp:%0.3f ki:%0.3f kd:%0.3f" % (self.nodename, self.kp, self.ki, self.kd))
 
         #### subscribers/publishers 
-        self.create_subscription(Wheels, "goal_wheels", self.goalWheelsCallback, qos_profile_system_default)
+        self.create_subscription(Wheels, "cmd_wheels", self.goalWheelsCallback, qos_profile_system_default)
         self.create_subscription(Wheels, "cal_wheels", self.calWheelsCallback, qos_profile_system_default)
  
-        self.pub_motor = self.create_publisher(Wheels, 'cmd_wheels', qos_profile_system_default) 
+        self.pub_motor = self.create_publisher(Wheels, '/robot/cmd_wheels', qos_profile_system_default) 
 
         self.create_timer(5, self.parametersCallback())
             
