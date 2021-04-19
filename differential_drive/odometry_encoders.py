@@ -53,7 +53,8 @@ diff_controller.py - controller for a differential drive
 
 """
 
-from math import sin, cos, pi
+from math import sin, cos
+import numpy as np
 
 import rclpy
 from rclpy.node import Node
@@ -75,16 +76,16 @@ class Odometry_Encoders(Node):
     #############################################################################
     def __init__(self):
         #############################################################################
-        super().__init__("odometry")
+        super().__init__("odometry_encoders")
 
         self.nodename = self.get_name()
-        self.get_logger().info("-I- %s started" % self.nodename)
+        self.get_logger().info("%s started" % self.nodename)
 
         #### parameters #######
         self.radius = float(self.declare_parameter(
-            'wheels.radius', 0.012).value)  # The wheel radius in meters
+            'wheels.radius', 0.02569).value)  # The wheel radius in meters
         self.base_width = float(self.declare_parameter(
-            'wheels.base_width', 0.245).value)  # The wheel base width in meters
+            'wheels.base_width', 0.1275).value)  # The wheel base width in meters
 
         # the name of the base frame of the robot
         self.base_frame_id = self.declare_parameter(
@@ -102,10 +103,6 @@ class Odometry_Encoders(Node):
             'ticks.encoder_min', -32768).value
         self.encoder_max = self.declare_parameter(
             'ticks.encoder_max', 32768).value
-        self.encoder_low_wrap = self.declare_parameter(
-            'ticks.wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min)
-        self.encoder_high_wrap = self.declare_parameter(
-            'ticks.wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min)
 
         # Init variables
         self.init()
@@ -128,25 +125,35 @@ class Odometry_Encoders(Node):
 
     #############################################################################
     def init(self):
-        #############################################################################
-        # internal data
+    #############################################################################
+
+        # Internal data
         self.enc_left = None        # wheel encoder readings
         self.enc_right = None
-
-        self.left = 0.0               # actual values coming back from robot
-        self.right = 0.0
         self.lvel = 0.0
         self.rvel = 0.0
         self.lmult = 0.0
         self.rmult = 0.0
         self.prev_lencoder = 0.0
         self.prev_rencoder = 0.0
+        self.encoder_low_wrap = (
+            self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min
+        self.encoder_high_wrap = (
+            self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min
 
-        self.x = 0.0                  # position in xy plane
+        # Actual values coming back from robot
+        self.left = 0.0           
+        self.right = 0.0
+
+        # Position in xy plane
+        self.x = 0.0
         self.y = 0.0
         self.th = 0.0
-        self.dx = 0.0                 # speeds in x/rotation
-        self.dr = 0.0
+        # Linear and angular velocities
+        self.linear_accumulator = {"sum": 0.0, "buffer": np.zeros(
+            10), "next_insert": 0, "buffer_filled": False}
+        self.angular_accumulator = {"sum": 0.0, "buffer": np.zeros(
+            10), "next_insert": 0, "buffer_filled": False}
 
         self.then = self.get_clock().now()
 
@@ -156,7 +163,7 @@ class Odometry_Encoders(Node):
         now = self.get_clock().now()  # Current time
 
         # Elapsed time [nanoseconds]
-        elapsed = now.seconds_nanoseconds()[1] - self.then.seconds_nanoseconds()[1]
+        elapsed = now.nanoseconds - self.then.nanoseconds
         elapsed = elapsed / 1e9  # Elapsed time [seconds]
         self.then = now  # Update previous time
 
@@ -164,7 +171,9 @@ class Odometry_Encoders(Node):
         self.publishCalVel(elapsed)  # Publish Calculated Velocities
         self.publishOdometry(now)  # Publish Odometry
 
+    #############################################################################
     def calculateOdometry(self, elapsed):
+        #############################################################################
 
         # calculate odometry
         if self.ticks_mode:
@@ -185,8 +194,13 @@ class Odometry_Encoders(Node):
         # Angular velocity
         th = (d_right - d_left) / (2 * self.base_width)
         # calculate velocities
-        self.dx = d / elapsed
-        self.dr = th / elapsed
+        dx = d / elapsed
+        dr = th / elapsed
+
+        self.linear_accumulator = self.accumulateMean(
+            self.linear_accumulator, dx)
+        self.angular_accumulator = self.accumulateMean(
+            self.angular_accumulator, dr)
 
         # Accumulate
 
@@ -199,7 +213,28 @@ class Odometry_Encoders(Node):
         self.y = self.y + (sin(self.th) * x + cos(self.th) * y)
         self.th = self.th + th
 
+    #############################################################################
+    def accumulateMean(self, dict, val):
+        #############################################################################
+        dict["sum"] = dict["sum"] - dict["buffer"][dict["next_insert"]]
+        dict["sum"] = dict["sum"] + val
+        dict["buffer"][dict["next_insert"]] = val
+        dict["next_insert"] = dict["next_insert"] + 1
+        dict["buffer_filled"] = dict["buffer_filled"] or (
+            dict["next_insert"] >= len(dict["buffer"]))
+        dict["next_insert"] = dict["next_insert"] % len(dict["buffer"])
+        return dict
+
+    #############################################################################
+    def getRollingMean(self, dict):
+        #############################################################################
+        valid_data_count = dict["buffer_filled"] * len(dict["buffer"]) + (
+            not dict["buffer_filled"]) * dict["next_insert"]
+        return float(dict["sum"] / valid_data_count)
+
+    #############################################################################
     def publishOdometry(self, now):
+        #############################################################################
 
         # publish the odom information
         quaternion = Quaternion()
@@ -239,22 +274,28 @@ class Odometry_Encoders(Node):
         odom.pose.pose.orientation = quaternion
 
         odom.child_frame_id = self.base_frame_id
-        odom.twist.twist.linear.x = self.dx
+        odom.twist.twist.linear.x = self.getRollingMean(
+            self.linear_accumulator)
         odom.twist.twist.linear.y = 0.0
-        odom.twist.twist.angular.z = self.dr
+        odom.twist.twist.angular.z = self.getRollingMean(
+            self.angular_accumulator)
 
         self.odom_pub.publish(odom)
 
+    #############################################################################
     def publishCalVel(self, elapsed):
+        #############################################################################
 
         cal_vel = Twist()
-        cal_vel.linear.x = self.dx
-        cal_vel.angular.z = self.dr
+        cal_vel.linear.x = self.getRollingMean(self.linear_accumulator)
+        cal_vel.angular.z = self.getRollingMean(self.angular_accumulator)
         cal_vel.linear.z = elapsed
 
         self.cal_vel_pub.publish(cal_vel)
 
+    #############################################################################
     def wheelsEncCallback(self, msg):
+        #############################################################################
 
         # Right Wheel Encoder
         encRight = msg.param[0]
@@ -282,7 +323,8 @@ class Odometry_Encoders(Node):
                            (self.encoder_max - self.encoder_min))
         self.prev_lencoder = encLeft
 
-        self.update()
+        if self.ticks_mode:
+            self.update()
 
     #############################################################################
     def wheelsCallback(self, msg):
@@ -290,7 +332,8 @@ class Odometry_Encoders(Node):
         self.right = msg.param[0]
         self.left = msg.param[1]
 
-        self.update()
+        if not self.ticks_mode:
+            self.update()
 
     #############################################################################
     def parametersCallback(self):
@@ -302,24 +345,20 @@ class Odometry_Encoders(Node):
             'wheels.base_width').value)
 
         # the name of the base frame of the robot
-        self.base_frame_id = self.get_parameter(
-            'base_frame_id').value
+        self.base_frame_id = self.get_parameter('base_frame_id').value
         # the name of the odometry reference frame
         self.odom_frame_id = self.get_parameter('odom_frame_id').value
 
         self.ticks_mode = self.get_parameter('ticks.ticks_mode').value
         # The number of wheel encoder ticks per meter of travel
-        self.ticks_meter = float(self.get_parameter(
-            'ticks.ticks_meter').value)
-        self.encoder_min = self.get_parameter(
-            'ticks.encoder_min').value
+        self.ticks_meter = float(self.get_parameter('ticks.ticks_meter').value)
+        self.encoder_min = self.get_parameter('ticks.encoder_min').value
         self.encoder_max = self.get_parameter('ticks.encoder_max').value
-        '''
-        self.encoder_low_wrap = self.get_parameter(
-            'ticks.wheel_low_wrap', (self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min)
-        self.encoder_high_wrap = self.get_parameter(
-            'ticks.wheel_high_wrap', (self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min)
-        '''
+
+        self.encoder_low_wrap = (
+            self.encoder_max - self.encoder_min) * 0.3 + self.encoder_min
+        self.encoder_high_wrap = (
+            self.encoder_max - self.encoder_min) * 0.7 + self.encoder_min
 
 
 def main(args=None):

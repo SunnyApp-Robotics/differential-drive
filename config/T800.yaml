@@ -1,0 +1,31 @@
+### PARAMETERS
+odometry_encoders:
+  ros_parameters:
+
+    # Sim time
+    use_sim_time: false
+
+    wheels.radius: 0.02569
+    wheels.base_width: 0.1275
+
+    base_frame_id: 'base_link'
+    odom_frame_id: 'odom'
+
+    ticks.ticks_mode: False
+    ticks.ticks_meter: 50 
+    ticks.encoder_min: -32768
+    ticks.encoder_max: 32768
+
+kinematics:
+  ros_parameters:
+
+    # Sim time
+    use_sim_time: false
+
+    wheels.radius: 0.02569
+    wheels.base_width: 0.1275
+
+    
+
+
+    

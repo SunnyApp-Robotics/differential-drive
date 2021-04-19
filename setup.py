@@ -1,3 +1,5 @@
+import os
+from glob import glob
 from setuptools import setup
 
 package_name = 'differential_drive'
@@ -10,6 +12,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name), glob('launch/*')),
+        (os.path.join('share', package_name), glob('config/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -21,8 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'virtual_joystick = differential_drive.virtual_joystick:main',
-            'diff_tf = differential_drive.diff_tf:main',
-            'twist_to_motors = differential_drive.twist_to_motors:main'
+            'kinematics = differential_drive.kinematics:main',
+            'odometry_encoders = differential_drive.odometry_encoders:main'
         ],
     },
 )

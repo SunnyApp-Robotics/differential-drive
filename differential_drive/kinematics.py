@@ -37,57 +37,61 @@ class Kinematics(Node):
 
     #############################################################
     def __init__(self):
-    #############################################################
+        #############################################################
         super().__init__("kinematics")
         self.nodename = self.get_name()
         self.get_logger().info("%s started" % self.nodename)
 
         #### parameters #######
-        self.radius = float(self.declare_parameter('wheels.radius', 0.012).value) # The wheel radius in meters
-        self.base_width = float(self.declare_parameter('wheels.base_width', 0.245).value) # The wheel base width in meters
-        
+        self.radius = float(self.declare_parameter(
+            'wheels.radius', 0.02569).value)  # The wheel radius in meters
+        self.base_width = float(self.declare_parameter(
+            'wheels.base_width', 0.1275).value)  # The wheel base width in meters
+
         # Init variables
         self.init()
 
         # subscriptions / publishers
-        self.create_subscription(Twist, 'cmd_vel', self.cmdVelCallback, qos_profile_system_default)
-        self.cmd_wheels_pub = self.create_publisher(Wheels, 'goal_wheels', qos_profile_system_default)
+        self.create_subscription(
+            Twist, 'cmd_vel', self.cmdVelCallback, qos_profile_system_default)
+        self.cmd_wheels_pub = self.create_publisher(
+            Wheels, 'cmd_wheels', qos_profile_system_default)
 
         # 5 seconds timer to update parametersl
         self.create_timer(5, self.parametersCallback)
-    
+
     #############################################################################
     def init(self):
-    #############################################################################
+        #############################################################################
         self.left = 0
         self.right = 0
 
     #############################################################
     def update(self):
-    #############################################################
-        now = self.get_clock().now() #Current time
+        #############################################################
+        now = self.get_clock().now()  # Current time
         self.calculateKinematics(now, self.cmd_dx, self.cmd_dr)
 
     #############################################################
     def calculateKinematics(self, now, dx, dr):
-    #############################################################
-        self.left = dx - self.base_width * dr / self.radius
-        self.right = dx + self.base_width * dr / self.radius
+        #############################################################
+        self.left = (dx - self.base_width * dr) / self.radius
+        self.right = (dx + self.base_width * dr) / self.radius
 
         self.publishWheelsCmd(now)
 
     #############################################################
     def publishWheelsCmd(self, now):
-    #############################################################
+        #############################################################
         cmd_wheels = Wheels()
         cmd_wheels.param[0] = self.right
         cmd_wheels.param[1] = self.left
-        
+
         self.cmd_wheels_pub.publish(cmd_wheels)
 
     #############################################################
     def cmdVelCallback(self, msg):
-    #############################################################
+        #############################################################
         self.cmd_dx = msg.linear.x
         self.cmd_dr = msg.angular.z
 
@@ -95,10 +99,11 @@ class Kinematics(Node):
 
     #############################################################
     def parametersCallback(self):
-    #############################################################
-        self.radius = float(self.get_parameter('wheels.radius').value) # The wheel radius in meters
-        self.base_width = float(self.get_parameter('wheels.base_width').value) # The wheel base width in meters
-        
+        #############################################################
+        # The wheel radius in meters
+        self.radius = float(self.get_parameter('wheels.radius').value)
+        # The wheel base width in meters
+        self.base_width = float(self.get_parameter('wheels.base_width').value)
 
 
 def main(args=None):
