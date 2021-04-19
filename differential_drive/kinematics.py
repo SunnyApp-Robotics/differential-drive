@@ -131,10 +131,6 @@ class Kinematics(Node):
             if motor_limited != motor:
                 self.integral = self.integral - (error * pid_dt)
 
-            if (all(self.target == 0)):
-                motor = motor * 0.0
-                motor_limited = motor_limited * 0.0
-
             if self.limited:
                 self.calculateKinematics(motor_limited)
             else:
