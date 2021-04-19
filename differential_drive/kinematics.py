@@ -96,7 +96,7 @@ class Kinematics(Node):
         #############################################################
         now = self.get_clock().now()  # Current time
         self.doPid(now)
-        self.publishWheelsCmd(now)
+        self.publishWheelsCmd()
 
     #####################################################
     def doPid(self, now):
