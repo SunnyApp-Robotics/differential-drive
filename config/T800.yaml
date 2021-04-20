@@ -6,7 +6,7 @@ odometry_encoders:
     use_sim_time: False
 
     wheels.radius: 0.02569
-    wheels.base_width: 0.1275
+    wheels.base_width: 0.30
 
     base_frame_id: 'base_link'
     odom_frame_id: 'odom'
@@ -23,12 +23,12 @@ kinematics:
     use_sim_time: False
 
     wheels.radius: 0.02569
-    wheels.base_width: 0.1275
+    wheels.base_width: 0.30
 
     close_loop: True
-    kp: 0.4
-    ki: 2.5
-    kd: 1.0
+    kp: 0.8
+    ki: 2.0
+    kd: 0.2
 
     limited: True
     linear_max: 0.621
